@@ -725,3 +725,56 @@ class TestRoundTwo:
         assert h.store.get_event(poison).state == DEAD
         assert h.store.get_event(healthy).state == DONE
         assert report.outcomes == ["ignored:no post"]
+
+
+class TestSummaryFormat:
+    """status_emoji, status_in_subject and summary_layout: the easier-to-read posts."""
+
+    @pytest.fixture
+    def styled(self):
+        h = Harness(status_emoji=True, status_in_subject=True, summary_layout=True)
+        h.approve()
+        h.run()
+        return h
+
+    def test_root_title_and_body(self, styled):
+        root = styled.root()
+        assert root["subject"] == "[\U0001F534 Open] Vacuum 3 hose split"
+        html = root["html"]
+        assert "<b>\U0001F534 Open</b>  ·  WO #5052" in html
+        assert "\U0001F4CD Springfield  ·  \U0001F464 Jane Doe" in html
+        assert "\U0001F552 <i>Updated Oct 30, 2026 2:10 PM CDT</i>" in html
+        assert "<p><b>Description</b></p>" in html
+        assert f'href="https://portal.example.com/utrack/work-orders?wo={WO_ID}"' in html
+        assert "<p>&nbsp;</p>" in html
+
+    def test_status_change_updates_the_title_and_replies_new_status_first(self, styled):
+        h = styled
+        h.status("IN_PROGRESS")
+        assert h.run().outcomes == ["updated:status,root"]
+        root = h.root()
+        assert root["subject"] == "[\U0001F7E1 In Progress] Vacuum 3 hose split"
+        assert "<b>\U0001F7E1 In Progress</b>" in root["html"]
+        assert [r["html"] for r in root["replies"]] == [
+            "<p><b>\U0001F7E1 In Progress</b> — by P. Quinn <i>(was \U0001F534 Open)</i></p>"
+        ]
+
+    def test_done_reply_and_title(self, styled):
+        h = styled
+        h.status("DONE")
+        h.run()
+        root = h.root()
+        assert root["subject"].startswith("[✅ Done] ")
+        assert root["replies"][-1]["html"] == (
+            "<p><b>✅ Done</b> — completed by P. Quinn <i>(was \U0001F534 Open)</i></p>"
+        )
+
+    def test_root_recovery_still_finds_the_styled_post(self, styled):
+        # The marker is the work order's own link, which the styled body still carries.
+        assert f"wo={WO_ID}" in styled.root()["html"]
+
+    def test_defaults_keep_the_classic_format(self, h):
+        h.approve()
+        h.run()
+        assert h.root()["subject"] == "Vacuum 3 hose split"
+        assert "<b>Status:</b> Open <i>" in h.root()["html"]

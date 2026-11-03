@@ -100,6 +100,12 @@ class FeedConfig:
     stuck_after_minutes: int = 60
     # While paused (sign-in lost, key rejected), check whether it's fixed this often.
     pause_recheck_seconds: int = 300
+    # Put an emoji before every status (root post and status replies), and put the current
+    # status in brackets at the front of the post title. Both off by default.
+    status_emoji: bool = False
+    status_in_subject: bool = False
+    # The summary root layout (render.summary_html) and the matching status-reply wording.
+    summary_layout: bool = False
 
 
 @dataclass
@@ -408,6 +414,8 @@ class FeedEngine:
             now=self._clock.now(),
             tz=self._tz,
             name_of=self._user_name,
+            emoji=self._config.status_emoji,
+            summary=self._config.summary_layout,
         )
         done: list[str] = []
         try:
@@ -587,8 +595,11 @@ class FeedEngine:
         status_override: str | None = None,
     ) -> tuple[str, str]:
         as_of = render.parse_iso(record.status_as_of) if record.status_as_of else self._clock.now()
+        label = render.status_badge(
+            status_override or self._status_label(snapshot), self._config.status_emoji
+        )
         view = render.RootView(
-            status_label=status_override or self._status_label(snapshot),
+            status_label=label,
             as_of_text=render.format_local(as_of, self._tz),
             sequential_id=snapshot.sequential_id,
             requester=record.requester,
@@ -596,10 +607,15 @@ class FeedEngine:
             images_html=images_html,
             link_url=self._link(record.work_order_id),
             extra_photos=record.extra_photos,
+            priority=snapshot.priority,
+            location=next((n for n in record.site_names if n), None) or snapshot.location_name,
         )
         site_names = [*record.site_names, snapshot.location_name or ""]
         subject = render.headline(snapshot.title, snapshot.sequential_id, site_names)
-        return subject, render.root_html(view)
+        if self._config.status_in_subject:
+            subject = render.subject_with_status(subject, label)
+        body = render.summary_html(view) if self._config.summary_layout else render.root_html(view)
+        return subject, body
 
     def _link(self, work_order_id: int) -> str:
         return self._config.portal_work_order_url.format(id=work_order_id)

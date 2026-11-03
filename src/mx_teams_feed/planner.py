@@ -15,7 +15,7 @@ from datetime import datetime, tzinfo
 from . import events
 from .events import MxEvent
 from .models import TERMINAL_STATUSES, PostRecord, WorkOrderSnapshot
-from .render import esc, format_date, parse_iso, status_label
+from .render import esc, format_date, parse_iso, status_badge, status_label
 
 NameOf = Callable[[int], str | None]
 
@@ -53,6 +53,8 @@ def plan_update(
     now: datetime,
     tz: tzinfo,
     name_of: NameOf,
+    emoji: bool = False,
+    summary: bool = False,
 ) -> UpdatePlan:
     old = record.work_order
     replies: list[Reply] = []
@@ -87,7 +89,12 @@ def plan_update(
     if _state(fresh) != _state(old):
         actor = _name(name_of, event.user_id) if describes_current and event.user_id else None
         replies.append(
-            Reply(f"status:{_state(old)}->{_state(fresh)}", _status_html(old, fresh, actor))
+            Reply(
+                f"status:{_state(old)}->{_state(fresh)}",
+                _summary_status_html(old, fresh, actor, emoji)
+                if summary
+                else _status_html(old, fresh, actor, emoji),
+            )
         )
         edit_root = True
         when = parse_iso(event.occurred_at) if event.occurred_at else now
@@ -128,12 +135,15 @@ def plan_update(
         and not overdue_notified
         and fresh.status not in TERMINAL_STATUSES
     ):
-        label = esc(status_label(fresh.status, fresh.sub_status))
+        label = esc(status_badge(status_label(fresh.status, fresh.sub_status), emoji))
         if fresh.due_date:
             text = f"was due {format_date(fresh.due_date, tz)} and is still {label}."
         else:
             text = f"still {label}."
-        replies.append(Reply(f"overdue:{fresh.due_date}", f"<p><b>Overdue</b> — {text}</p>"))
+        mark = "⚠️ " if emoji else ""
+        replies.append(
+            Reply(f"overdue:{fresh.due_date}", f"<p>{mark}<b>Overdue</b> — {text}</p>")
+        )
         overdue_notified = True
 
     return UpdatePlan(
@@ -152,9 +162,26 @@ def plan_delete() -> DeletePlan:
     )
 
 
-def _status_html(old: WorkOrderSnapshot, new: WorkOrderSnapshot, actor: str | None) -> str:
+def _summary_status_html(
+    old: WorkOrderSnapshot, new: WorkOrderSnapshot, actor: str | None, emoji: bool
+) -> str:
+    """New status first: "🟡 In Progress — by Jane Doe (was 🔴 Open)"."""
+    new_label = status_badge(status_label(new.status, new.sub_status), emoji)
+    old_label = status_badge(status_label(old.status, old.sub_status), emoji)
+    if _is_terminal(old) and not _is_terminal(new):
+        return f"<p><b>Reopened</b> — now {esc(new_label)} (was {esc(old_label)})</p>"
+    if new.status == "DONE" and not new.sub_status:
+        by = f" — completed by {esc(actor)}" if actor else ""
+    else:
+        by = f" — by {esc(actor)}" if actor else ""
+    return f"<p><b>{esc(new_label)}</b>{by} <i>(was {esc(old_label)})</i></p>"
+
+
+def _status_html(
+    old: WorkOrderSnapshot, new: WorkOrderSnapshot, actor: str | None, emoji: bool = False
+) -> str:
     by = f" — by {esc(actor)}" if actor else ""
-    new_label = status_label(new.status, new.sub_status)
+    new_label = status_badge(status_label(new.status, new.sub_status), emoji)
     if _is_terminal(old) and not _is_terminal(new):
         return f"<p><b>Reopened</b> — now {esc(new_label)}</p>"
     if new.status == "DONE" and not new.sub_status:
@@ -162,7 +189,7 @@ def _status_html(old: WorkOrderSnapshot, new: WorkOrderSnapshot, actor: str | No
         return f"<p><b>Done</b>{completed}</p>"
     if _is_terminal(new):
         return f"<p><b>{esc(new_label)}</b>{by}</p>"
-    old_label = status_label(old.status, old.sub_status)
+    old_label = status_badge(status_label(old.status, old.sub_status), emoji)
     return f"<p><b>Status:</b> {esc(old_label)} → {esc(new_label)}{by}</p>"
 
 

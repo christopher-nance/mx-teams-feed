@@ -297,3 +297,41 @@ class TestDeferredCompletion:
         plan = _plan(replace(BASE, status="DONE"), event, record)
         assert _texts(plan) == ["<p><b>Done</b> — completed by P. Quinn</p>"]
         assert plan.snapshot.sub_status is None
+
+
+class TestStyledReplies:
+    def _styled(self, fresh, event=None, record=None, **flags):
+        return planner.plan_update(
+            record=record or _record(), fresh=fresh, event=event or _event(), now=NOW, tz=TZ,
+            name_of=NAMES.get, **{"emoji": True, "summary": True, **flags},
+        )
+
+    def test_new_status_first_with_was(self):
+        event = _event(events.WORK_ORDER_STATUS_CHANGE, new_status="ON_HOLD", user_id=500501)
+        plan = self._styled(replace(BASE, status="ON_HOLD"), event)
+        assert _texts(plan) == [
+            "<p><b>⏸️ On Hold</b> — by P. Quinn <i>(was \U0001F534 Open)</i></p>"
+        ]
+
+    def test_canceled(self):
+        event = _event(events.WORK_ORDER_STATUS_CHANGE, new_status="DONE", new_sub_status="CANCELED")
+        plan = self._styled(replace(BASE, status="DONE"), event)
+        assert _texts(plan) == ["<p><b>❌ Canceled</b> <i>(was \U0001F534 Open)</i></p>"]
+
+    def test_reopened(self):
+        record = _record(replace(BASE, status="DONE"))
+        event = _event(events.WORK_ORDER_STATUS_CHANGE, new_status="OPEN")
+        plan = self._styled(BASE, event, record)
+        assert _texts(plan) == [
+            "<p><b>Reopened</b> — now \U0001F534 Open (was ✅ Done)</p>"
+        ]
+
+    def test_emoji_without_summary_keeps_the_classic_wording(self):
+        event = _event(events.WORK_ORDER_STATUS_CHANGE, new_status="IN_PROGRESS")
+        plan = self._styled(replace(BASE, status="IN_PROGRESS"), event, summary=False)
+        assert _texts(plan) == ["<p><b>Status:</b> \U0001F534 Open → \U0001F7E1 In Progress</p>"]
+
+    def test_overdue_gets_a_warning_sign(self):
+        event = _event(events.WORK_ORDER_OVERDUE)
+        plan = self._styled(BASE, event)
+        assert _texts(plan)[0].startswith("<p>⚠️ <b>Overdue</b> — was due ")

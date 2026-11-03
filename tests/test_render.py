@@ -155,3 +155,27 @@ class TestRootHtml:
     def test_unknown_requester_is_omitted(self):
         html = render.root_html(_view(requester=None))
         assert "Requested by" not in html
+
+
+def test_status_badge_and_subject():
+    from mx_teams_feed.render import STATUS_EMOJI, status_badge, subject_with_status
+
+    assert status_badge("Open") == "\U0001F534 Open"
+    assert status_badge("Open", emoji=False) == "Open"
+    assert status_badge("Something new") == "Something new"
+    assert set(STATUS_EMOJI) >= {"Open", "In Progress", "On Hold", "Done", "Canceled", "Skipped"}
+    assert subject_with_status("Pump leak", "\U0001F534 Open") == "[\U0001F534 Open] Pump leak"
+
+
+def test_summary_layout_bolds_short_heading_lines_and_escapes_text():
+    from mx_teams_feed.render import RootView, summary_html
+
+    view = RootView(
+        status_label="Open", as_of_text="Nov 3", sequential_id=7, requester=None,
+        description="Leak <b>here</b>\nTroubleshooting Attempted:\nChecked: valve, pump",
+        images_html="", link_url="https://p.example/wo?wo=7", priority="HIGH", location=None,
+    )
+    html = summary_html(view)
+    assert "Leak &lt;b&gt;here&lt;/b&gt;<br><b>Troubleshooting Attempted:</b><br>Checked: valve, pump" in html
+    assert "High priority" in html
+    assert "\U0001F4CD" not in html and "\U0001F464" not in html  # no location or requester line
